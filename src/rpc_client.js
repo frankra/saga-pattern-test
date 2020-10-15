@@ -7,105 +7,138 @@ if (args.length == 0) {
     process.exit(1);
 }
 
-async function getConnection() {
-    return new Promise((resolve, reject) => {
-        amqp.connect("amqp://localhost:5672", (err, connection) => {
-            if (err) {
-                reject(err);
-            }
-            resolve(connection);
-        });
-    });
-}
+class RPCClient {
 
-async function createChannel(connection) {
-    return new Promise((resolve, reject) => {
-        connection.createChannel((err, channel) => {
-            if (err) {
-                reject(err);
-            }
-            resolve(channel);
-        });
-    });
-}
+    constructor(){
+        this._connectionPromise;
+        this._channelPromise;
+        this._qPromise;
+    
+        this._callbackPromises = {};
+    }
+    
 
-async function getQueue(channel, queueName = "") {
-    return new Promise((resolve, reject) => {
-        channel.assertQueue(
-            queueName,
-            {
-                exclusive: true,
-            },
-            (error2, q) => {
-                if (error2) {
-                    reject(error2);
-                }
-                resolve(q);
-            }
-        );
-    });
-}
+    async start() {
+        let connection = await this.getConnection();
+        let channel = await this.createChannel(connection);
+        let q = await this.getQueue(channel, "");
+        this.setupConsumer(channel,q, this._callbackPromises);
+    }
 
-function generateUuid() {
-    return (
-        Math.random().toString() +
-        Math.random().toString() +
-        Math.random().toString()
-    );
-}
+    async getConnection() {
+        if (!this._connectionPromise) {
+            this._connectionPromise = new Promise((resolve, reject) => {
+                amqp.connect("amqp://localhost:5672", (err, connection) => {
+                    if (err) {
+                        reject(err);
+                    }
+                    resolve(connection);
+                });
+            });
+        }
+        return this._connectionPromise;
 
-async function callRPC(channel, q, num) {
-    let startMs = Date.now();
-    return new Promise((resolve, reject) => {
-        let correlationId = generateUuid();
+    }
 
-        console.log(" [x] Requesting fib(%d)", num);
+    async createChannel(connection) {
+        if (!this._channelPromise) {
+            this._channelPromise = new Promise((resolve, reject) => {
+                connection.createChannel((err, channel) => {
+                    if (err) {
+                        reject(err);
+                    }
+                    resolve(channel);
+                });
+            });
+        }
+        return this._channelPromise;
+    }
 
+    async getQueue(channel, queueName = "") {
+        if (!this._qPromise) {
+            this._qPromise = new Promise((resolve, reject) => {
+                channel.assertQueue(
+                    queueName,
+                    {
+                        exclusive: true,
+                    },
+                    (error2, q) => {
+                        if (error2) {
+                            reject(error2);
+                        }
+                        resolve(q);
+                    }
+                );
+            });
+        }
+        return this._qPromise;
+    }
+
+    setupConsumer(channel, q, map) {
         channel.consume(
             q.queue,
             (msg) => {
-                console.log("msgReceived", msg.properties.correlationId);
-                if (msg.properties.correlationId === correlationId) {
-                    console.log(`took: ${Date.now() - startMs}ms`);
-                    resolve(msg);
-                    // setTimeout(function () {
-                    //     connection.close();
-                    //     process.exit(0);
-                    // }, 500);
+                const resolveFn = map[msg.properties.correlationId];
+                if (resolveFn) {
+                    resolveFn(msg);
                 } else {
-                    reject({
-                        msg: `msg correlation id: ${msg.properties.correlationId} != ${correlationId}`,
-                    });
+                    console.log(`Promise not found for: ${msg.properties.correlationId}`);
                 }
             },
             {
                 noAck: true,
             }
         );
+    }
+
+    async callRPC(num) {
+        const channel = await this._channelPromise;
+        const q = await this._qPromise;
+
+        let startMs = Date.now();//perf
+        let correlationId = this.generateUuid();
+
+        let resolveFn;
+        const result = new Promise(resolve => {
+            resolveFn = resolve;
+        }).then(data => {//perf
+            console.log(`took: ${Date.now() - startMs}ms`);
+            return data;
+        });
+
+        this._callbackPromises[correlationId] = resolveFn;
 
         channel.sendToQueue("rpc_queue", Buffer.from(num.toString()), {
             correlationId: correlationId,
             replyTo: q.queue,
         });
-    });
+
+        return result;
+    }
+
+    generateUuid() {
+        return (
+            Math.random().toString() +
+            Math.random().toString() +
+            Math.random().toString()
+        );
+    }
 }
+
 
 async function run(args) {
     try {
-        let connection = await getConnection();
-        console.log("connection");
-        let channel = await createChannel(connection);
-        console.log("channel");
-        let q = await getQueue(channel, "");
-        console.log("q");
+        let arraySize = parseInt(args[0]) || 100;
 
-        let arraySize = parseInt(args[0]) | 10;
+        const client = new RPCClient();
+        await client.start();
 
         for (let i = 1; i <= arraySize; i++) {
             console.log(`\n\ncall ${i} of ${arraySize}`);
-            const msg = await callRPC(channel, q, 3);
+            const msg = await client.callRPC(3);
             console.log(" [.] Got %s", msg.content.toString());
         }
+        process.exit();
     } catch (e) {
         console.error("catch", e);
     }
