@@ -1,0 +1,29 @@
+{
+  "name": "saga-pattern-test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "rabbitmq": "./docker.sh",
+    "server": "node ./src/rpc_server.js",
+    "client": "node ./src/rpc_client.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/frankra/saga-pattern-test.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/frankra/saga-pattern-test/issues"
+  },
+  "homepage": "https://github.com/frankra/saga-pattern-test#readme",
+  "dependencies": {
+    "amqplib": "^0.6.0",
+    "chai": "^4.2.0",
+    "express": "^4.17.1",
+    "mocha": "^8.1.3",
+    "typescript": "^4.0.3"
+  }
+}
