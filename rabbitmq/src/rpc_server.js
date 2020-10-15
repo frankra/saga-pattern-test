@@ -1,5 +1,6 @@
 
 var amqp = require('amqplib/callback_api');
+const task = require('../../task.js')
 
 amqp.connect('amqp://localhost:5672', function(error0, connection) {
   if (error0) {
@@ -16,12 +17,12 @@ amqp.connect('amqp://localhost:5672', function(error0, connection) {
     });
     channel.prefetch(1);
     console.log(' [x] Awaiting RPC requests');
-    channel.consume(queue, function reply(msg) {
+    channel.consume(queue, async function reply(msg) {
       var n = parseInt(msg.content.toString());
 
       console.log(" [.] fib(%d)", n);
 
-      var r = fibonacci(n);
+      var r = await task(n);
 
       channel.sendToQueue(msg.properties.replyTo,
         Buffer.from(r.toString()), {
@@ -33,9 +34,3 @@ amqp.connect('amqp://localhost:5672', function(error0, connection) {
   });
 });
 
-function fibonacci(n) {
-  if (n == 0 || n == 1)
-    return n;
-  else
-    return fibonacci(n - 1) + fibonacci(n - 2);
-}
